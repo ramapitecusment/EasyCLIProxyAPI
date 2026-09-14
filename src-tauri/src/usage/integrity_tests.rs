@@ -38,6 +38,7 @@ fn control_openai_cached_reasoning_subset() {
 fn control_claude_independent_cache() {
     let mut v = record("claude-sonnet-4-6", 1000, 1000);
     v["provider"] = json!("claude");
+    v["executor_type"] = json!("ClaudeExecutor");
     v["tokens"]["cache_read_tokens"] = json!(4000);
     v["tokens"]["cache_creation_tokens"] = json!(2000);
     v["tokens"]["total_tokens"] = json!(8000);
@@ -48,6 +49,7 @@ fn control_claude_independent_cache() {
 fn gemini_thinking_is_billable_output() {
     let mut v = record("gemini-2.5-pro", 10000, 1000);
     v["provider"] = json!("gemini");
+    v["executor_type"] = json!("GeminiExecutor");
     v["tokens"]["reasoning_tokens"] = json!(9000);
     v["tokens"]["total_tokens"] = json!(20000);
     check(cost(vec![v]), 0.1125);
@@ -151,6 +153,7 @@ fn grok_long_context_output_multiplier_is_two() {
 fn claude_hour_cache_write_rate() {
     let mut v = record("claude-sonnet-4-6", 0, 0);
     v["provider"] = json!("claude");
+    v["executor_type"] = json!("ClaudeExecutor");
     v["tokens"]["cache_creation_tokens"] = json!(100000);
     v["tokens"]["total_tokens"] = json!(100000);
     v["cache_creation_1h_tokens"] = json!(100000);
@@ -496,4 +499,55 @@ fn overview_distinguishes_events_from_billable_generation_groups() {
     assert_eq!(overview.event_counts["tool"], 1);
     assert_eq!(overview.event_counts["prewarm"], 1);
     assert_eq!(overview.event_counts["logical_generations"], 1);
+}
+
+#[test]
+fn legacy_gemini_usage_is_folded_once_before_pricing() {
+    let mut value = record("gemini-2.5-pro", 10_000, 1_000);
+    value["provider"] = json!("gemini");
+    value["executor_type"] = json!("GeminiExecutor");
+    value["tokens"]["reasoning_tokens"] = json!(9_000);
+    value["tokens"]["total_tokens"] = json!(20_000);
+    let normalized = normalize_usage_record(value.clone(), &GuiConfigFile::default()).unwrap();
+    assert_eq!(normalized.tokens.output_tokens, 10_000);
+    assert_eq!(normalized.tokens.total_tokens, 20_000);
+    assert_eq!(normalized.accounting["quality"], "legacy");
+    check(cost(vec![value]), 0.1125);
+}
+
+#[test]
+fn provider_name_alone_does_not_rewrite_legacy_token_contract() {
+    for provider in ["gemini", "custom-gemini-proxy", "anthropic"] {
+        let mut value = record("custom-model", 100, 20);
+        value["provider"] = json!(provider);
+        value["tokens"]["reasoning_tokens"] = json!(5);
+        value["tokens"]["cache_read_tokens"] = json!(30);
+        let normalized = normalize_usage_record(value, &GuiConfigFile::default()).unwrap();
+        assert_eq!(normalized.tokens.input_tokens, 100, "{provider}");
+        assert_eq!(normalized.tokens.output_tokens, 20, "{provider}");
+        assert_eq!(normalized.tokens.total_tokens, 120, "{provider}");
+        assert_eq!(normalized.accounting["quality"], "legacy", "{provider}");
+    }
+}
+
+#[test]
+fn canonical_breakdown_is_authoritative_after_keeper_normalization() {
+    for (provider, executor) in [("gemini", "GeminiExecutor"), ("claude", "ClaudeExecutor")] {
+        let mut value = record("custom-model", 100, 20);
+        value["provider"] = json!(provider);
+        value["executor_type"] = json!(executor);
+        value["tokens"]["reasoning_tokens"] = json!(5);
+        value["tokens"]["cache_read_tokens"] = json!(30);
+        value["token_breakdown"] = json!({
+            "schema_version": 2, "quality": "complete", "total_tokens": 120,
+            "input": {"total_tokens": 100, "uncached_tokens": 70, "cache_read_tokens": 30, "cache_write_tokens": 0},
+            "output": {"total_tokens": 20, "non_reasoning_tokens": 15, "reasoning_tokens": 5},
+            "unclassified_tokens": 0
+        });
+        let normalized = normalize_usage_record(value, &GuiConfigFile::default()).unwrap();
+        assert_eq!(normalized.tokens.input_tokens, 100, "{executor}");
+        assert_eq!(normalized.tokens.output_tokens, 20, "{executor}");
+        assert_eq!(normalized.tokens.total_tokens, 120, "{executor}");
+        assert_eq!(normalized.accounting["quality"], "complete", "{executor}");
+    }
 }

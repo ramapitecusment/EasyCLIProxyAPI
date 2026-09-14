@@ -11,10 +11,49 @@ export type ModelOption = {
   inputModalities?: Array<'text' | 'image'>;
   thinking?: Record<string, unknown>;
 };
-export type ModelProvider = 'gemini' | 'codex' | 'claude' | 'openai';
+export type ModelProvider = 'gemini' | 'codex' | 'deepseek' | 'claude' | 'openai';
+
+export type ModelSelectionMode = 'initial' | 'refresh';
 
 const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com';
 const DEFAULT_CLAUDE_BASE_URL = 'https://api.anthropic.com';
+export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com';
+
+const modelKey = (name: string) => name.trim().toLowerCase();
+
+export function mergeModelOptions(...groups: ModelOption[][]): ModelOption[] {
+  const merged = new Map<string, ModelOption>();
+  groups.flat().forEach((model) => {
+    const name = model.name.trim();
+    if (!name) return;
+    merged.set(modelKey(name), { ...model, name });
+  });
+  return Array.from(merged.values());
+}
+
+export function reconcileModelSelection(
+  discoveredModels: ModelOption[],
+  configuredModels: ModelOption[],
+  selectedModelNames: Iterable<string>,
+  mode: ModelSelectionMode,
+): Set<string> {
+  const availableNames = new Set(
+    mergeModelOptions(discoveredModels, configuredModels).map((model) => modelKey(model.name)),
+  );
+  const configuredNames = new Set(
+    configuredModels.map((model) => modelKey(model.name)).filter(Boolean),
+  );
+  const previousSelection = new Set(
+    Array.from(selectedModelNames, modelKey).filter(Boolean),
+  );
+  const requestedSelection = mode === 'refresh'
+    ? previousSelection
+    : configuredNames.size > 0
+      ? configuredNames
+      : new Set(discoveredModels.map((model) => modelKey(model.name)).filter(Boolean));
+
+  return new Set(Array.from(requestedSelection).filter((name) => availableNames.has(name)));
+}
 
 export function normalizeBaseUrl(value: string): string {
   let raw = value.trim();
@@ -47,6 +86,8 @@ export const modelEndpointCandidates = (provider: ModelProvider, baseUrl: string
       ? DEFAULT_GEMINI_BASE_URL
       : provider === 'claude'
         ? DEFAULT_CLAUDE_BASE_URL
+        : provider === 'deepseek'
+          ? DEEPSEEK_BASE_URL
         : '');
   const normalized = normalizeBaseUrl(resolvedBaseUrl);
   if (!normalized) return [];
@@ -57,6 +98,7 @@ export const modelEndpointCandidates = (provider: ModelProvider, baseUrl: string
   const withoutVersion = base.replace(/\/(?:v1beta|v1)$/i, '');
   if (provider === 'gemini') return [`${withoutVersion}/v1beta/models`];
   if (provider === 'claude') return [`${withoutVersion}/v1/models`];
+  if (provider === 'deepseek') return [`${base}/models`];
   return [/\/v1$/i.test(base) ? `${base}/models` : `${base}/v1/models`];
 };
 

@@ -60,21 +60,8 @@ pub(super) fn normalize_accounting(value: &Value, tokens: &mut UsageTokenStats) 
             quality = "unsupported";
         }
     } else {
-        let identity = format!(
-            "{} {}",
-            value["provider"].as_str().unwrap_or(""),
-            value["executor_type"].as_str().unwrap_or("")
-        )
-        .to_ascii_lowercase();
-        if ["gemini", "antigravity", "vertex"]
-            .iter()
-            .any(|p| identity.contains(p))
-        {
-            tokens.output_tokens = tokens.output_tokens.saturating_add(tokens.reasoning_tokens);
-            if value["tokens"]["total_tokens"].as_u64().unwrap_or(0) == 0 {
-                tokens.total_tokens = tokens.input_tokens.saturating_add(tokens.output_tokens);
-            }
-        }
+        // Keeper normalization already applies the legacy executor contract.
+        // Reapplying provider-based folds here would count Gemini reasoning twice.
         if tokens.input_tokens.checked_add(tokens.output_tokens) != Some(tokens.total_tokens)
             || tokens
                 .cache_read_tokens

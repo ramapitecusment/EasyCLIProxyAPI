@@ -4,7 +4,7 @@ The dashboard reports usage events and the known USD amount associated with them
 
 ## Measurement and valuation
 
-The collector preserves normalized token breakdown v2, quality, raw provider usage, cache lifetimes, event/attempt/generation IDs, transport, upstream URL, and reported cost. V2 is authoritative. Legacy Gemini thinking is included in billable output; OpenAI cached/reasoning tokens are subsets. Invalid or incomplete breakdowns are never repaired by inventing tokens. A missing usage object differs from an observed zero.
+The collector preserves normalized token breakdown v2, quality, raw provider usage, cache lifetimes, event/attempt/generation IDs, transport, upstream URL, and reported cost. V2 is authoritative. Legacy records use the upstream Keeper normalizer exactly once: recognized executor contracts take precedence, provider identity is a fallback only for OAuth, and unknown producers retain their reported parent fields. Gemini thinking is included in billable output where that contract is known; OpenAI cached/reasoning tokens are subsets. Invalid or incomplete breakdowns are never repaired by inventing tokens. A missing usage object differs from an observed zero.
 
 Each newly ingested event receives a valuation snapshot when its amount is known. The snapshot records the rates and rule version used, so editing prices does not rewrite known historical amounts. Legacy records without a snapshot can still be estimated using available prices, and an unknown event can acquire a later manual tariff. This does not recreate historical rates or lost upstream usage.
 
@@ -40,7 +40,7 @@ With the companion CLIProxyAPI update, the collector reads `/v0/management/usage
 
 Only a 404 enables legacy queue fallback; a journal storage/network/ACK error remains visible and is retried. A lost ACK cannot double-count a committed event. The core journal is a single-consumer local spool whose unacknowledged files do not expire. Operators must monitor storage if the collector is stopped. Disk failure, upstream omission, and events lost before upgrading cannot be fixed by deduplication.
 
-**Release dependency:** `core-version.txt` stays at 7.2.158 until an upstream core release containing the companion fix exists. Before shipping the complete feature, publish that core release and update the pin using the project's normal release workflow. The desktop changes remain backward compatible, but legacy cores do not provide the new durability and source coverage.
+**Release dependency:** `core-version.txt` follows upstream `dev` at 7.3.1. Upstream already supports token breakdown schema v2; this release does not contain the proposed journal/ACK endpoints, delivery identities, and extended billing dimensions from the companion PR. Before shipping the complete feature, publish a core release containing those changes and update the pin using the project's normal release workflow. The desktop changes remain backward compatible, but legacy cores do not provide the new durability and source coverage.
 
 ## Regression validation
 

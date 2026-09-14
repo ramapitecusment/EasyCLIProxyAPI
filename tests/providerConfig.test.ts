@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  allModelSelectionForDiscovery,
   applyProviderRemarkIdentity,
   applyProviderPreset,
   buildProviderRecord,
   createProviderDraft,
   DEEPSEEK_BASE_URL,
-  DEEPSEEK_THINKING_LEVELS,
   exclusionsForModelSelection,
   modelSelectionForDiscovery,
   parseProviderHeaders,
@@ -51,8 +49,7 @@ describe('API 接入配置合并', () => {
     ]);
   });
 
-  it('DeepSeek 新增预设默认发现全部模型并应用内置思考等级', () => {
-    expect(DEEPSEEK_THINKING_LEVELS).toEqual(['low', 'high', 'max']);
+  it('DeepSeek 使用 Codex API 记录且不写入内置思考等级', () => {
     const draft = createProviderDraft('deepseek');
     const discovered = [
       { name: 'deepseek-chat' },
@@ -65,7 +62,7 @@ describe('API 接入配置合并', () => {
       models: discovered,
     });
     const identified = applyProviderRemarkIdentity('deepseek', prepared);
-    const result = buildProviderRecord('openai-compatibility', identified);
+    const result = buildProviderRecord('codex-api-key', identified);
 
     expect(draft.name).toBe('DeepSeek');
     expect(draft.remark).toBe('');
@@ -75,19 +72,16 @@ describe('API 接入配置合并', () => {
     expect(result).toMatchObject({
       name: 'DeepSeek',
       'base-url': 'https://api.deepseek.com',
-      'api-key-entries': [{ 'api-key': 'deepseek-key' }],
+      'api-key': 'deepseek-key',
       models: [
         {
           name: 'deepseek-chat',
-          thinking: { levels: [...DEEPSEEK_THINKING_LEVELS] },
         },
         {
           name: 'deepseek-reasoner',
-          thinking: { levels: [...DEEPSEEK_THINKING_LEVELS] },
         },
         {
           name: 'deepseek-new-model',
-          thinking: { levels: [...DEEPSEEK_THINKING_LEVELS] },
         },
       ],
     });
@@ -104,14 +98,20 @@ describe('API 接入配置合并', () => {
     expect(draft.name).toBe('生产环境');
   });
 
-  it('DeepSeek 接入单独归类，不在 OpenAI 兼容列表重复显示', () => {
-    const record = {
+  it('DeepSeek 只从 Codex API 分类识别，旧 OpenAI 兼容记录保持原样', () => {
+    const codexRecord = {
+      name: 'custom-deepseek',
+      'base-url': 'https://api.deepseek.com/v1',
+    };
+    const legacyRecord = {
       name: 'custom-deepseek',
       'base-url': 'https://api.deepseek.com/v1',
     };
 
-    expect(providerCategoryMatchesRecord('deepseek', record)).toBe(true);
-    expect(providerCategoryMatchesRecord('openai-compatibility', record)).toBe(false);
+    expect(providerCategoryMatchesRecord('deepseek', codexRecord, 'codex-api-key')).toBe(true);
+    expect(providerCategoryMatchesRecord('codex-api-key', codexRecord, 'codex-api-key')).toBe(false);
+    expect(providerCategoryMatchesRecord('deepseek', legacyRecord, 'openai-compatibility')).toBe(false);
+    expect(providerCategoryMatchesRecord('openai-compatibility', legacyRecord, 'openai-compatibility')).toBe(true);
   });
 
   it('OpenAI 兼容接入把选定思考等级写入全部开放模型', () => {
@@ -386,19 +386,5 @@ describe('API 接入配置合并', () => {
     );
 
     expect(Array.from(selected)).toEqual(['model-a', 'model-b']);
-  });
-
-  it('模型选择窗口每次打开都以接口返回的全部模型作为默认选择', () => {
-    const selected = allModelSelectionForDiscovery([
-      { name: 'deepseek-chat' },
-      { name: 'deepseek-reasoner' },
-      { name: 'deepseek-new-model' },
-    ]);
-
-    expect(Array.from(selected)).toEqual([
-      'deepseek-chat',
-      'deepseek-reasoner',
-      'deepseek-new-model',
-    ]);
   });
 });

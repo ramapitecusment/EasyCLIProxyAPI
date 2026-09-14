@@ -17,6 +17,7 @@ import {
   LoaderCircle,
   Monitor,
   Moon,
+  RefreshCw,
   Sun,
   X,
 } from "lucide-react";
@@ -30,8 +31,11 @@ import {
   responseList,
 } from "../services/managementApi";
 import {
+  DEEPSEEK_BASE_URL,
   fetchModels,
+  mergeModelOptions,
   normalizeBaseUrl,
+  reconcileModelSelection,
   type ModelOption,
   type ModelProvider,
 } from "../services/modelService";
@@ -84,7 +88,7 @@ const apiSectionOptions: ApiSectionOption[] = [
   { id: "claude", managementSection: "claude-api-key", nameKey: "easyMode.api.platformName.claude", provider: "claude", defaultBaseUrl: "", icon: claudeIcon },
   { id: "codex", managementSection: "codex-api-key", nameKey: "easyMode.api.platformName.codex", provider: "codex", defaultBaseUrl: "", icon: codexIcon },
   { id: "gemini", managementSection: "gemini-api-key", nameKey: "easyMode.api.platformName.gemini", provider: "gemini", defaultBaseUrl: "", icon: geminiIcon },
-  { id: "deepseek", managementSection: "openai-compatibility", nameKey: "easyMode.api.platformName.deepseek", provider: "openai", defaultBaseUrl: "https://api.deepseek.com", icon: deepseekIcon },
+  { id: "deepseek", managementSection: "codex-api-key", nameKey: "easyMode.api.platformName.deepseek", provider: "deepseek", defaultBaseUrl: DEEPSEEK_BASE_URL, icon: deepseekIcon },
 ];
 
 const isDeepSeekRecord = (record: Record<string, unknown>) => {
@@ -135,6 +139,7 @@ export function EasyModePage({
   const [apiTesting, setApiTesting] = useState(false);
   const [apiTestedModels, setApiTestedModels] = useState<ModelOption[]>([]);
   const [apiSelectedModels, setApiSelectedModels] = useState<ModelOption[]>([]);
+  const [apiModelsReady, setApiModelsReady] = useState(false);
   const [apiErrorMessage, setApiTestError] = useState<NoticeMessage>("");
   const apiTestError = typeof apiErrorMessage === "string"
     ? apiErrorMessage
@@ -190,7 +195,7 @@ export function EasyModePage({
         const sourceList = recordsBySection[section.managementSection];
         const list = section.id === "deepseek"
           ? sourceList.filter(isDeepSeekRecord)
-          : section.id === "openai-compatibility"
+          : section.id === "codex"
             ? sourceList.filter((record) => !isDeepSeekRecord(record))
             : sourceList;
         counts[section.id] = list.length;
@@ -321,6 +326,7 @@ export function EasyModePage({
     if (opt) setApiBaseUrl(opt.defaultBaseUrl);
     setApiTestedModels([]);
     setApiSelectedModels([]);
+    setApiModelsReady(false);
     setApiTestError("");
     clearApiNotice();
     setGuideApiSaved(false);
@@ -338,10 +344,7 @@ export function EasyModePage({
     }
     setApiTesting(true);
     setApiTestError("");
-    setApiTestedModels([]);
-    setApiSelectedModels([]);
     setGuideApiSaved(false);
-    setGuideApiModelsFetched(false);
 
     const opt = apiSectionOptions.find((o) => o.id === selectedApiSection);
     const providerType = opt ? opt.provider : "openai";
@@ -356,8 +359,18 @@ export function EasyModePage({
         10000,
       );
       if (models.length > 0) {
-        setApiTestedModels(models);
-        setApiSelectedModels(models);
+        const mergedModels = mergeModelOptions(models);
+        const selectedNames = reconcileModelSelection(
+          mergedModels,
+          [],
+          apiSelectedModels.map((model) => model.name),
+          apiModelsReady ? "refresh" : "initial",
+        );
+        setApiTestedModels(mergedModels);
+        setApiSelectedModels(
+          mergedModels.filter((model) => selectedNames.has(model.name.trim().toLowerCase())),
+        );
+        setApiModelsReady(true);
         setGuideApiModelsFetched(true);
       } else {
         setApiTestError({ key: "easyMode.api.noModelsFound" });
@@ -390,6 +403,10 @@ export function EasyModePage({
       setApiTestError({ key: "easyMode.api.apiKeyRequired" });
       return;
     }
+    if (selectedApiSection === "deepseek" && !apiModelsReady) {
+      setApiTestError({ key: "easyMode.api.fetchListFirst" });
+      return;
+    }
     if (apiSelectedModels.length === 0) {
       setApiTestError({ key: "easyMode.api.modelRequired" });
       return;
@@ -408,7 +425,8 @@ export function EasyModePage({
       const managementSection = selectedOption?.managementSection ?? "openai-compatibility";
       const configPayload = await managementApi.get("/config");
       const list = responseList(configPayload, managementSection);
-      const models = apiSelectedModels.map((model) => ({ name: model.name.trim() }));
+      const selectedModels = apiSelectedModels.map((model) => ({ name: model.name.trim() }));
+      const models = selectedModels;
       const newEntry = managementSection === "openai-compatibility"
         ? {
           name: apiRemark.trim() || `${selectedApiSection} (${list.length + 1})`,
@@ -419,6 +437,7 @@ export function EasyModePage({
           models,
         }
         : {
+          ...(selectedApiSection === "deepseek" ? { name: "DeepSeek" } : {}),
           "api-key": apiKey.trim(),
           "base-url": normalizeBaseUrl(apiBaseUrl.trim()),
           models,
@@ -923,7 +942,12 @@ export function EasyModePage({
                       type="text"
                       className="text-input"
                       value={apiBaseUrl}
-                      onChange={(e) => { setApiBaseUrl(e.target.value); setGuideApiSaved(false); }}
+                      onChange={(e) => {
+                        setApiBaseUrl(e.target.value);
+                        setApiModelsReady(false);
+                        setGuideApiModelsFetched(false);
+                        setGuideApiSaved(false);
+                      }}
                       placeholder="https://..."
                     />
                   </div>
@@ -933,7 +957,12 @@ export function EasyModePage({
                       type="password"
                       className="text-input"
                       value={apiKey}
-                      onChange={(e) => { setApiKey(e.target.value); setGuideApiSaved(false); }}
+                      onChange={(e) => {
+                        setApiKey(e.target.value);
+                        setApiModelsReady(false);
+                        setGuideApiModelsFetched(false);
+                        setGuideApiSaved(false);
+                      }}
                       placeholder="sk-..."
                     />
                   </div>
@@ -963,11 +992,24 @@ export function EasyModePage({
                     <>
                       <div className="simple-mode-api-model-heading">
                         <strong>{t("easyMode.api.modelListTitle")}</strong>
+                        <button
+                          type="button"
+                          className="secondary-button compact-button"
+                          disabled={apiTesting || !apiBaseUrl.trim() || !apiKey.trim()}
+                          onClick={() => void handleTestApi()}
+                        >
+                          <RefreshCw size={14} className={apiTesting ? "spin" : ""} />
+                          {t("common.refresh")}
+                        </button>
                       </div>
 
                       <div className="simple-mode-api-model-selection">
                         <div className="simple-mode-api-model-selection-heading">
-                          <span>{t("easyMode.api.modelListHint")}</span>
+                          <span>
+                            {selectedApiSection === "deepseek" && !apiModelsReady
+                              ? t("easyMode.api.modelListStale")
+                              : t("easyMode.api.modelListHint")}
+                          </span>
                         </div>
                         <div className="simple-mode-api-model-options">
                           {apiTestedModels.map((model) => {
@@ -983,6 +1025,7 @@ export function EasyModePage({
                                 <input
                                   type="checkbox"
                                   checked={selected}
+                                  disabled={apiTesting}
                                   onChange={() => handleToggleApiModel(model)}
                                 />
                                 <span title={model.name}>{model.name}</span>
@@ -996,7 +1039,13 @@ export function EasyModePage({
                         <button
                           type="button"
                           className="primary-button"
-                          disabled={apiSaving || !apiBaseUrl.trim() || !apiKey.trim() || apiSelectedModels.length === 0}
+                          disabled={
+                            apiSaving
+                            || !apiBaseUrl.trim()
+                            || !apiKey.trim()
+                            || apiSelectedModels.length === 0
+                            || (selectedApiSection === "deepseek" && !apiModelsReady)
+                          }
                           onClick={() => void handleSaveApi()}
                         >
                           {t("easyMode.api.saveAndConnect")}
